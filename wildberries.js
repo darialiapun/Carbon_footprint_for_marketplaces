@@ -16,13 +16,16 @@
 
     const SELECTORS = {
         // Кнопка "Купить"/блок цены — рядом с ним вставляем виджет.
+        // WB использует хэшированные CSS-модули (например "actionsBlockMain--qmJlL") —
+        // хэш-суффикс после "--" может смениться при деплое, поэтому матчим только
+        // устойчивую смысловую часть класса через [class*="..."].
         rightColumn: [
-            '.product-page__price-block',
-            '[class*="priceBlockDetail"]',
-            '.price-block',
+            '[class*="actionsBlockMain"]',
+            '[class*="productPrice"]',
+            '[class*="priceBlock"]',
             'aside'
         ],
-        title: 'h1[class*="productTitle"], h1'
+        title: "h1"
     };
 
     function normalizePairKey(label) {
