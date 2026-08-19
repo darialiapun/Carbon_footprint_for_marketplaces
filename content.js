@@ -107,6 +107,19 @@
         breadcrumbs: '[data-widget="breadCrumbs"] a, nav[aria-label*="хлеб"] a'
     };
 
+    /** Поставь false, когда экстракция станет надежной и логи больше не нужны. */
+    const DEBUG_ECO = true;
+
+    /** Печатает пронумерованный шаг конвейера в консоль DevTools. */
+    function logStep(step, title, payload) {
+        if (!DEBUG_ECO) return;
+        console.log(
+            `%c[Eco-Tracker] Шаг ${step}: ${title}`,
+            "color:#1e8e3e;font-weight:bold;"
+        );
+        if (payload !== undefined) console.log(payload);
+    }
+
     let scheduledRun = null;
     /** Идентичность карточки (без габаритов): габариты могут догрузиться позже. */
     let currentIdentityKey = "";
@@ -485,13 +498,37 @@
 
         const weightFromVariants = extractWeightFromVariantButtons();
         const weightFromPairKeys = extractWeightFromPairs(pairs);
-        const weightKg =
-            weightFromPairKeys ||
-            parseWeightToKg(weightFromPairsText) ||
-            weightFromVariants ||
-            fromScripts.weightKg ||
-            null;
-        const dimensions = parseDimensionsMm(dimensionsFromPairs) || fromScripts.dimensions;
+        const weightFromPageText = parseWeightToKg(weightFromPairsText);
+
+        // Отслеживаем, какой именно способ дал вес — это и есть то,
+        // что раньше было не видно и мешало понять, откуда берутся "похожие" цифры.
+        let weightKg = null;
+        let weightSource = "не найден (пойдет fallback)";
+        if (weightFromPairKeys) {
+            weightKg = weightFromPairKeys;
+            weightSource = "пары «характеристика: значение»";
+        } else if (weightFromPageText) {
+            weightKg = weightFromPageText;
+            weightSource = "текст страницы (regex по слову «Вес/Масса»)";
+        } else if (weightFromVariants) {
+            weightKg = weightFromVariants;
+            weightSource = "кнопки вариантов (выбор веса)";
+        } else if (fromScripts.weightKg) {
+            weightKg = fromScripts.weightKg;
+            weightSource = "JSON внутри <script>";
+        }
+
+        const dimensionsFromPairsParsed = parseDimensionsMm(dimensionsFromPairs);
+        let dimensions = null;
+        let dimensionsSource = "не найдены";
+        if (dimensionsFromPairsParsed) {
+            dimensions = dimensionsFromPairsParsed;
+            dimensionsSource = "пары «характеристика: значение»";
+        } else if (fromScripts.dimensions) {
+            dimensions = fromScripts.dimensions;
+            dimensionsSource = "JSON внутри <script>";
+        }
+
         const compositionText = buildCompositionBlob(pairs, fullText);
 
         const productName = document.querySelector(SELECTORS.title)?.textContent?.trim() || "Товар";
@@ -502,9 +539,12 @@
             productName,
             category,
             weightKg,
+            weightSource,
             fallbackWeightKg,
             dimensions,
-            compositionText
+            dimensionsSource,
+            compositionText,
+            pairsCount: Object.keys(pairs).length
         };
     }
 
@@ -851,6 +891,11 @@
             const target = findInjectionTarget();
             if (!target) return;
 
+            logStep(1, "Страница товара найдена", {
+                url: location.pathname,
+                injectionTarget: target.tagName + (target.getAttribute("data-widget") ? `[data-widget=${target.getAttribute("data-widget")}]` : "")
+            });
+
             //  Сбор данных (Твоя логика с ожиданием характеристик)
             let data = extractProductData();
             if (!data.weightKg) {
@@ -858,8 +903,29 @@
                 data = await waitForProductData();
             }
 
+            logStep(2, "Данные со страницы собраны", {
+                productName: data.productName,
+                category: data.category,
+                pairsCount: data.pairsCount,
+                "ВЕС (реальный)": data.weightKg,
+                "└─ откуда взят вес": data.weightSource,
+                "вес fallback (запасной)": data.fallbackWeightKg,
+                dimensions: data.dimensions,
+                "└─ откуда взяты размеры": data.dimensionsSource,
+                compositionTextSnippet: (data.compositionText || "").slice(0, 150) || "(пусто)"
+            });
+
             //  РАСЧЕТ ПО ВОРОНКЕ (Новое: Материал -> Категория -> Fallback)
             const result = computeComprehensiveEmission(data);
+
+            logStep(3, "Выбрана ветка расчета", {
+                branch: result.branch,
+                "использован реальный вес?": !result.isFallbackWeight,
+                "найден материал?": result.isMaterialMatch,
+                "источник коэффициента": result.source,
+                usedWeightKg: result.usedWeight,
+                usedCoefficient: result.usedCoefficient
+            });
 
             //  ИДЕНТИФИКАЦИЯ КАРТОЧКИ (Твоя логика, чтобы герой не "мигал")
             // Используем финальный вес для ключа
@@ -875,6 +941,12 @@
             // Убираем логистическую надбавку, чтобы расчет совпадал с формулой пользователя.
             const totalFootprint = productEmission + packagingEmission;
 
+            logStep(4, "Итоговые цифры посчитаны", {
+                productEmissionKg: Number(productEmission.toFixed(3)),
+                packagingEmissionKg: Number(packagingEmission.toFixed(3)),
+                totalFootprintKg: Number(totalFootprint.toFixed(3))
+            });
+
             //  РЕНДЕР (Передаем всё в виджет)
             renderWidget(target, {
                 totalFootprint,
@@ -885,6 +957,8 @@
                 calcSource: result.source, // какой материал или категория сработали
                 hero: currentHero || pickHero()
             });
+
+            logStep(5, "Виджет отрисован", { hero: (currentHero || {}).name });
 
         } catch (err) {
             console.error("Eco-Extension Error:", err);
