@@ -305,6 +305,32 @@
     }
 
     /**
+     * Сколько штук товара в одной карточке/упаковке (например "Комплект трусов, 3 шт").
+     * FALLBACK_WEIGHTS — это вес ОДНОЙ штуки, поэтому для комплектов его нужно умножать.
+     * Реальный вес с сайта и оценку по объёму НЕ умножаем — они и так про физическую
+     * упаковку целиком (реальный вес — это вес посылки, объём — размеры реальной коробки).
+     */
+    function extractPackQuantity(pairs, productName) {
+        const keyRe = /единиц\s+в\s+(одном\s+)?товаре|количество\s+в\s+упаковке|штук\s+в\s+упаковке|количество\s+штук/i;
+        for (const [key, value] of Object.entries(pairs)) {
+            if (!keyRe.test(key)) continue;
+            const n = parseNumber(value);
+            if (n && n > 1) return Math.round(n);
+        }
+        // Фоллбэк: ищем "3 шт" / "комплект из 3" прямо в названии товара.
+        // Важно: \b не работает с кириллицей в JS (\w = только латиница), поэтому
+        // вместо границы слова используем негативный lookahead на русскую букву.
+        const fromTitle =
+            productName.match(/(\d+)\s*шт(?![а-яёa-z])/i) ||
+            productName.match(/комплект\s*из\s*(\d+)/i);
+        if (fromTitle) {
+            const n = parseNumber(fromTitle[1]);
+            if (n && n > 1) return Math.round(n);
+        }
+        return 1;
+    }
+
+    /**
      * Оценка веса по габаритам: объём коробки (Д×Ш×В) × эффективная плотность
      * категории. Используется только когда реального веса нет, но есть размеры —
      * это точнее, чем один фиксированный вес на всю категорию (fallback).
@@ -660,7 +686,9 @@
         const productName = document.querySelector(SELECTORS.title)?.textContent?.trim() || "Товар";
         const category = deriveCategoryText(productName);
         const categoryBucket = detectCategoryBucket(category, productName);
-        const fallbackWeightKg = inferFallbackWeightKg(category, productName);
+        const packQuantity = extractPackQuantity(pairs, productName);
+        // Плоский fallback — это вес ОДНОЙ штуки, поэтому для комплектов умножаем на кол-во.
+        const fallbackWeightKg = inferFallbackWeightKg(category, productName) * packQuantity;
         // Оценка по объёму точнее плоского fallback-веса, но доступна только если есть размеры.
         const volumeEstimatedWeightKg = estimateWeightFromVolumeKg(dimensions, categoryBucket);
 
@@ -670,6 +698,7 @@
             weightKg,
             weightSource,
             fallbackWeightKg,
+            packQuantity,
             volumeEstimatedWeightKg,
             dimensions,
             dimensionsSource,
@@ -1057,6 +1086,7 @@
                 "ВЕС (реальный)": data.weightKg,
                 "└─ откуда взят вес": data.weightSource,
                 "вес fallback (запасной, по категории)": data.fallbackWeightKg,
+                "штук в упаковке": data.packQuantity,
                 "вес по объёму (Д×Ш×В × плотность)": data.volumeEstimatedWeightKg,
                 dimensions: data.dimensions,
                 "└─ откуда взяты размеры": data.dimensionsSource,
