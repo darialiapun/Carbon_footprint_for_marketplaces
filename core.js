@@ -698,6 +698,8 @@
      */
     function createRunner(adapter) {
         let scheduledRun = null;
+        /** Момент первого "непойманного" изменения DOM в текущей серии — для потолка ожидания. */
+        let pendingBurstStartedAt = null;
         /** Идентичность карточки (без габаритов): габариты могут догрузиться позже. */
         let currentIdentityKey = "";
         /** Случайный эко-герой фиксируем на один товар (чтобы не мигал при каждом MutationObserver). */
@@ -805,11 +807,27 @@
             }
         }
 
+        /**
+         * Обычный дебаунс (ждём delay мс тишины) — но с потолком: на сайтах с
+         * непрерывной фоновой возней в DOM (карусели, чат-виджеты, баннеры — как на
+         * WB) мутации могут сбрасывать таймер практически бесконечно, и виджет так
+         * и не появляется. Поэтому считаем время с НАЧАЛА текущей серии изменений и
+         * не даём общей задержке превысить MAX_WAIT_MS, даже если тишины не было.
+         */
+        const MAX_WAIT_MS = 1500;
+
         function scheduleRun(delay = 250) {
+            const now = Date.now();
+            if (pendingBurstStartedAt === null) pendingBurstStartedAt = now;
+
+            const elapsed = now - pendingBurstStartedAt;
+            const effectiveDelay = Math.max(0, Math.min(delay, MAX_WAIT_MS - elapsed));
+
             window.clearTimeout(scheduledRun);
             scheduledRun = window.setTimeout(() => {
+                pendingBurstStartedAt = null;
                 runWidgetPipeline().catch(() => {});
-            }, delay);
+            }, effectiveDelay);
         }
 
         function setupNavigationHooks() {

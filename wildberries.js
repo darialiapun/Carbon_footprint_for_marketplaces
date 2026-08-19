@@ -151,12 +151,15 @@
     }
 
     function emptyProductData(note) {
+        // Даже если card.json не пришёл, не подставляем вес 0 — считаем честный
+        // fallback по категории/названию (то же, что делает Ozon при неудаче).
+        const productName = document.querySelector(SELECTORS.title)?.textContent?.trim() || "Товар";
         return {
-            productName: document.querySelector(SELECTORS.title)?.textContent?.trim() || "Товар",
+            productName,
             category: "",
             weightKg: null,
             weightSource: note,
-            fallbackWeightKg: 0,
+            fallbackWeightKg: EcoCore.inferFallbackWeightKg("", productName),
             packQuantity: 1,
             volumeEstimatedWeightKg: null,
             dimensions: null,
