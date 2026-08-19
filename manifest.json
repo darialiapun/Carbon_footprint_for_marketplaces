@@ -5,19 +5,27 @@
   "permissions": ["storage"],
   "host_permissions": [
     "*://*.ozon.ru/*",
+    "*://*.wildberries.ru/*",
+    "*://*.wbbasket.ru/*",
     "https://api.climatiq.io/*"
   ],
   "content_scripts": [
     {
       "matches": ["*://*.ozon.ru/*"],
-      "js": ["config.js", "content.js"],
+      "js": ["core.js", "ozon.js"],
       "css": ["styles.css"],
-      "run_at": "document_idle" 
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.wildberries.ru/*"],
+      "js": ["core.js", "wildberries.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
   {
     "resources": [ "animals/*.png", "animals/*.jpg" ],
-    "matches": [ "https://*.ozon.ru/*" ]
+    "matches": [ "https://*.ozon.ru/*", "https://*.wildberries.ru/*" ]
   }
 ]}
