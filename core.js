@@ -576,6 +576,17 @@
 
         widget.innerHTML = `
             <style>
+                /* Точка вставки на некоторых сайтах (например WB) сама является
+                   flex/grid-контейнером — без этого наш блок сжимается вбок вместо
+                   того чтобы встать отдельной строкой на всю ширину. */
+                #eco-widget-container {
+                    display: block !important;
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    flex: 1 1 100% !important;
+                    box-sizing: border-box !important;
+                }
+
                 #eco-widget-container .eco-widget-card {
                     padding: 16px 16px 12px 16px;
                     border: 1px solid #e0e0e0;

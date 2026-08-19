@@ -41,25 +41,34 @@
      * Ищем среди уже выполненных сетевых запросов страницы тот, что вернул
      * card.json — так мы получаем реальный, актуальный на сегодня basket-хост,
      * не пытаясь вычислить/угадать его сами.
+     *
+     * WB — SPA: при переходе между товарами без полной перезагрузки страницы
+     * записи о СТАРЫХ card.json остаются в performance-логе браузера. Поэтому
+     * матчим URL именно по артикулу текущего товара (он есть прямо в пути:
+     * .../<nmId>/info/ru/card.json), а не берём первый попавшийся card.json —
+     * иначе залипают данные предыдущего товара.
      */
-    function findCardJsonUrlFromPerformance() {
+    function findCardJsonUrlFromPerformance(nmId) {
         const entries = performance.getEntriesByType("resource");
-        const entry = entries.find((e) => /basket-\d+\.wbbasket\.ru\/.*\/info\/ru\/card\.json/i.test(e.name));
-        return entry ? entry.name : null;
+        const re = new RegExp(`basket-\\d+\\.wbbasket\\.ru/.*/${nmId}/info/ru/card\\.json`, "i");
+        const matches = entries.filter((e) => re.test(e.name));
+        if (!matches.length) return null;
+        // Берём самую свежую запись (на случай если этот же товар открывали раньше).
+        return matches[matches.length - 1].name;
     }
 
-    async function waitForCardJsonUrl(maxAttempts = 15, delayMs = 200) {
+    async function waitForCardJsonUrl(nmId, maxAttempts = 15, delayMs = 200) {
         for (let i = 0; i < maxAttempts; i += 1) {
-            const url = findCardJsonUrlFromPerformance();
+            const url = findCardJsonUrlFromPerformance(nmId);
             if (url) return url;
             await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
         return null;
     }
 
-    async function fetchCardJson() {
+    async function fetchCardJson(nmId) {
         try {
-            const url = await waitForCardJsonUrl();
+            const url = await waitForCardJsonUrl(nmId);
             if (!url) return null;
             const res = await fetch(url, { credentials: "omit" });
             if (!res.ok) return null;
@@ -172,7 +181,7 @@
         // Не запускаем второй параллельный fetch для того же товара.
         if (inFlightNmId !== nmId) {
             inFlightNmId = nmId;
-            const card = await fetchCardJson();
+            const card = await fetchCardJson(nmId);
             if (card && getNmIdFromUrl() === nmId) {
                 cachedForNmId = nmId;
                 cachedCardData = buildProductDataFromCardJson(card);
