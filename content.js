@@ -13,10 +13,32 @@
         electronics: 1.2,   
         beauty: 0.25,        
         home_chem: 1.0,      
-        furniture: 15.0,    
-        food: 0.5,          
+        furniture: 15.0,
+        food: 0.5,
+        auto_parts: 0.2,
         default: 0.7
     };
+
+    /**
+     * Эффективная плотность категории: кг товара на м³ УПАКОВКИ (объём коробки
+     * по габаритам с Ozon), а не только самого товара — коробка редко заполнена
+     * под завязку. Оценка по тому, из чего обычно состоят товары категории и
+     * насколько плотно они обычно упакованы. Как и остальные коэффициенты в
+     * файле — инженерная эвристика, не сертифицированные данные, можно уточнять.
+     */
+    const CATEGORY_DENSITY_KG_PER_M3 = {
+        clothing: 150,      // мягкое, много воздуха в сложенном виде
+        outerwear: 120,     // объемное, но часто сжато в упаковке
+        shoes: 90,          // внутри обуви много пустоты
+        electronics: 250,   // корпус + пустоты под защитную пену
+        beauty: 400,        // бутылочки/тюбики, но с зазорами в коробке
+        home_chem: 800,     // жидкость почти вплотную к стенкам тары
+        furniture: 150,     // ДСП/картон с большими пустотами (короба плоской упаковки)
+        food: 450,          // смесь сухих (легких) и жидких/твердых (тяжелых) товаров
+        auto_parts: 180,    // пластик/металл, но часто полые детали (как фильтр)
+        default: 200
+    };
+
     /* Коэффициенты материалов: кг CO2 на кг материала */
     const MATERIAL_COEFFICIENTS = {
         "натуральный шелк": 35,
@@ -236,6 +258,7 @@
         if (/бытовая\s*техника|фен|пылесос|чайник|блендер|мультивар|утюг|электрон|смартфон|телефон|ноутбук|планшет|наушник/.test(hay)) return "electronics";
         if (/мебель|диван|шкаф|кресл|стол|стул|матрас/.test(hay)) return "furniture";
         if (/продукты\s*питания|гастроном|супермаркет|кулинар|корм|консерв|колбас|сыр|хлеб|овощ|фрукт/.test(hay)) return "food";
+        if (/автотовар|запчаст.*авто|фильтр.*(авто|салон)|автомоб/.test(hay)) return "auto_parts";
         return "default";
     }
 
@@ -244,6 +267,22 @@
         if (titleWeight && titleWeight > 0) return titleWeight;
         const bucket = detectCategoryBucket(categoryText, productName);
         return FALLBACK_WEIGHTS[bucket] || FALLBACK_WEIGHTS.default;
+    }
+
+    /**
+     * Оценка веса по габаритам: объём коробки (Д×Ш×В) × эффективная плотность
+     * категории. Используется только когда реального веса нет, но есть размеры —
+     * это точнее, чем один фиксированный вес на всю категорию (fallback).
+     */
+    function estimateWeightFromVolumeKg(dimensions, bucket) {
+        if (!dimensions) return null;
+        const volumeM3 =
+            (dimensions.lengthMm / 1000) *
+            (dimensions.widthMm / 1000) *
+            (dimensions.heightMm / 1000);
+        if (!Number.isFinite(volumeM3) || volumeM3 <= 0) return null;
+        const density = CATEGORY_DENSITY_KG_PER_M3[bucket] || CATEGORY_DENSITY_KG_PER_M3.default;
+        return normalizeWeightKg(volumeM3 * density);
     }
 
     function deriveCategoryText(productName) {
@@ -301,7 +340,30 @@
         if (/состав\s+материала/i.test(t)) return true;
         if (/(^|\s)(вес|масса)(\s|$)/i.test(t)) return true;
         if (/(^|\s)(размеры|габариты)(\s|$)/i.test(t)) return true;
+        if (/^(длина|ширина|высота|глубина)(\s|,|$)/i.test(t)) return true;
         return false;
+    }
+
+    /**
+     * Основной блок характеристик Ozon: <div id="section-characteristics"> с рядами
+     * <dl><dt>Ключ</dt><dd>Значение</dd></dl>. Собираем ВСЕ пары без фильтра по словам —
+     * именно тут раньше терялось почти всё (например отдельные "Длина, мм"/"Ширина, мм",
+     * которые не совпадают со словами "вес"/"размеры"). CSS-классы Ozon (типа "pdp_ia9")
+     * хэшированные и часто меняются при деплоях — поэтому опираемся только на id и теги.
+     */
+    function collectPairsFromCharacteristicsSection() {
+        const pairs = {};
+        const container = document.querySelector("#section-characteristics");
+        if (!container) return pairs;
+
+        const rows = container.querySelectorAll("dl");
+        for (const row of rows) {
+            const key = row.querySelector("dt")?.textContent?.trim();
+            const value = row.querySelector("dd")?.textContent?.trim();
+            if (!key || !value) continue;
+            pairs[normalizePairKey(key)] = value;
+        }
+        return pairs;
     }
 
     function collectPairsFromAboutSection() {
@@ -381,6 +443,11 @@
                 if (valueText) pairs[key] = valueText;
             }
         }
+
+        // Самый надежный источник — секция "Характеристики" (dl/dt/dd), без фильтра
+        // по словам. Добавляем последним, чтобы перекрыть менее точные совпадения выше.
+        Object.assign(pairs, collectPairsFromCharacteristicsSection());
+
         return pairs;
     }
 
@@ -419,6 +486,26 @@
         }
 
         return result;
+    }
+
+    /**
+     * У части товаров нет единого поля "Размеры/Габариты" — вместо этого три
+     * отдельных: "Длина, мм", "Ширина, мм", "Высота, мм" (как у автозапчастей).
+     */
+    function extractDimensionsFromSeparateFields(pairs) {
+        const readMm = (re) => {
+            for (const [key, value] of Object.entries(pairs)) {
+                if (!re.test(key)) continue;
+                const n = parseNumber(value);
+                if (n !== null) return n;
+            }
+            return null;
+        };
+        const lengthMm = readMm(/^длина(\s|,|$)/i);
+        const widthMm = readMm(/^ширина(\s|,|$)/i);
+        const heightMm = readMm(/^(высота|глубина)(\s|,|$)/i);
+        if (![lengthMm, widthMm, heightMm].every((n) => Number.isFinite(n))) return null;
+        return { lengthMm, widthMm, heightMm };
     }
 
     function getPairValue(pairs, keyRe) {
@@ -519,11 +606,15 @@
         }
 
         const dimensionsFromPairsParsed = parseDimensionsMm(dimensionsFromPairs);
+        const dimensionsFromSeparateFields = extractDimensionsFromSeparateFields(pairs);
         let dimensions = null;
         let dimensionsSource = "не найдены";
         if (dimensionsFromPairsParsed) {
             dimensions = dimensionsFromPairsParsed;
             dimensionsSource = "пары «характеристика: значение»";
+        } else if (dimensionsFromSeparateFields) {
+            dimensions = dimensionsFromSeparateFields;
+            dimensionsSource = "раздельные поля «Длина/Ширина/Высота»";
         } else if (fromScripts.dimensions) {
             dimensions = fromScripts.dimensions;
             dimensionsSource = "JSON внутри <script>";
@@ -533,7 +624,10 @@
 
         const productName = document.querySelector(SELECTORS.title)?.textContent?.trim() || "Товар";
         const category = deriveCategoryText(productName);
+        const categoryBucket = detectCategoryBucket(category, productName);
         const fallbackWeightKg = inferFallbackWeightKg(category, productName);
+        // Оценка по объёму точнее плоского fallback-веса, но доступна только если есть размеры.
+        const volumeEstimatedWeightKg = estimateWeightFromVolumeKg(dimensions, categoryBucket);
 
         return {
             productName,
@@ -541,6 +635,7 @@
             weightKg,
             weightSource,
             fallbackWeightKg,
+            volumeEstimatedWeightKg,
             dimensions,
             dimensionsSource,
             compositionText,
@@ -597,7 +692,18 @@
      */
     function computeComprehensiveEmission(data) {
         const realWeight = data.weightKg || null;
-        const fallbackWeight = data.fallbackWeightKg || null;
+        // Приоритет для веса "не по этикетке": сперва оценка по объёму упаковки
+        // (габариты × плотность категории), и только если габаритов нет вообще —
+        // плоский fallback-вес по категории.
+        const volumeWeight = data.volumeEstimatedWeightKg || null;
+        const fallbackWeight = volumeWeight || data.fallbackWeightKg || null;
+        const weightEstimationMethod = realWeight
+            ? "реальный (со страницы)"
+            : volumeWeight
+            ? "оценка по объёму × плотность категории"
+            : fallbackWeight
+            ? "среднее по категории (fallback)"
+            : "нет данных";
         // Для материала используем только состав/характеристики.
         // Название товара часто дает ложные совпадения (пример: "зеленый" -> "лен").
         const materialBlob = `${data.compositionText}`.trim();
@@ -614,6 +720,7 @@
                 source: "none",
                 isFallbackWeight: true,
                 isMaterialMatch: false,
+                weightEstimationMethod,
                 branch: "none"
             };
         }
@@ -627,6 +734,7 @@
                 source: materialHit.keyword,
                 isFallbackWeight: false,
                 isMaterialMatch: true,
+                weightEstimationMethod,
                 branch: "1_real_weight_real_material"
             };
         }
@@ -640,6 +748,7 @@
                 source: materialHit.keyword,
                 isFallbackWeight: true,
                 isMaterialMatch: true,
+                weightEstimationMethod,
                 branch: "2_1_fallback_weight_real_material"
             };
         }
@@ -655,11 +764,12 @@
                 source: "категория",
                 isFallbackWeight: false,
                 isMaterialMatch: false,
+                weightEstimationMethod,
                 branch: "2_2_real_weight_category"
             };
         }
 
-        // 3) примерный вес * категория
+        // 3) примерный вес (объём или fallback) * категория
         const finalWeight = fallbackWeight || realWeight || 0;
         if (!finalWeight) {
             return {
@@ -669,6 +779,7 @@
                 source: "none",
                 isFallbackWeight: true,
                 isMaterialMatch: false,
+                weightEstimationMethod,
                 branch: "none"
             };
         }
@@ -680,7 +791,8 @@
             source: "категория",
             isFallbackWeight: true,
             isMaterialMatch: false,
-            branch: "3_fallback_weight_category"
+            weightEstimationMethod,
+            branch: volumeWeight ? "3_volume_estimated_weight_category" : "3_fallback_weight_category"
         };
     }
     function calcPackagingWeightKg(dimensions) {
@@ -909,7 +1021,8 @@
                 pairsCount: data.pairsCount,
                 "ВЕС (реальный)": data.weightKg,
                 "└─ откуда взят вес": data.weightSource,
-                "вес fallback (запасной)": data.fallbackWeightKg,
+                "вес fallback (запасной, по категории)": data.fallbackWeightKg,
+                "вес по объёму (Д×Ш×В × плотность)": data.volumeEstimatedWeightKg,
                 dimensions: data.dimensions,
                 "└─ откуда взяты размеры": data.dimensionsSource,
                 compositionTextSnippet: (data.compositionText || "").slice(0, 150) || "(пусто)"
@@ -920,7 +1033,7 @@
 
             logStep(3, "Выбрана ветка расчета", {
                 branch: result.branch,
-                "использован реальный вес?": !result.isFallbackWeight,
+                "метод оценки веса": result.weightEstimationMethod,
                 "найден материал?": result.isMaterialMatch,
                 "источник коэффициента": result.source,
                 usedWeightKg: result.usedWeight,
