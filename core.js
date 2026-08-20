@@ -548,8 +548,11 @@
         const container = document.createElement("div");
         container.id = "eco-widget-container";
 
-        // Используем append, чтобы виджет встал ВНИЗУ блока (под ценой)
-        target.append(container);
+        // Вставляем СРАЗУ ПОСЛЕ target (как отдельный блок-сосед), а не внутрь него:
+        // на некоторых сайтах (например WB) target сам является flex-строкой, и
+        // добавление ребёнка внутрь него сжимает виджет вбок вместо того чтобы
+        // поставить его отдельной строкой снизу.
+        target.insertAdjacentElement("afterend", container);
         return container;
     }
 
@@ -789,6 +792,12 @@
                     totalFootprintKg: Number(totalFootprint.toFixed(3))
                 });
 
+                // Отключаем наблюдатель на время своей же перерисовки: иначе
+                // вставка/обновление виджета — это тоже изменение DOM, которое
+                // наблюдатель заметит и запустит весь конвейер заново сам на себя
+                // (бесконечный цикл перерисовки, особенно заметно на сайтах вроде
+                // WB с постоянной фоновой анимацией — там цикл долго не затухает).
+                observer?.disconnect();
                 renderWidget(target, {
                     totalFootprint,
                     productEmission,
@@ -798,6 +807,7 @@
                     calcSource: result.source,
                     hero: currentHero || pickHero()
                 });
+                observer?.observe(document.body, { childList: true, subtree: true });
 
                 logStep(5, "Виджет отрисован", { hero: (currentHero || {}).name });
             } catch (err) {
