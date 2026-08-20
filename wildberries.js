@@ -172,7 +172,7 @@
 
         revealAttemptedForNmId = nmId;
         el.click();
-        setTimeout(() => closeCharacteristicsModal(nmId), 600);
+        setTimeout(() => closeCharacteristicsModal(nmId), 200);
         return true;
     }
 
