@@ -169,27 +169,33 @@
         };
     }
 
-    // Кэшируем card.json на артикул, чтобы не запрашивать его повторно
-    // при каждом срабатывании MutationObserver на той же карточке.
+    // Кэшируем card.json на артикул. Важно: пытаемся получить его ТОЛЬКО ОДИН РАЗ
+    // на товар — extractProductData() может вызываться много раз подряд (ретраи
+    // конвейера, срабатывания MutationObserver), и если при неудаче каждый раз
+    // заново ждать до 3с поиска URL — задержки складываются в десятки секунд.
+    // Поэтому все вызовы для одного и того же товара разделяют один и тот же
+    // промис и получают его результат мгновенно после первой попытки.
     let cachedCardData = null;
     let cachedForNmId = null;
-    let inFlightNmId = null;
+    let attemptedNmId = null;
+    let inFlightPromise = null;
 
     async function extractProductData() {
         const nmId = getNmIdFromUrl();
         if (!nmId) return emptyProductData("страница не похожа на карточку товара");
 
-        if (cachedForNmId === nmId && cachedCardData) return cachedCardData;
-
-        // Не запускаем второй параллельный fetch для того же товара.
-        if (inFlightNmId !== nmId) {
-            inFlightNmId = nmId;
-            const card = await fetchCardJson(nmId);
-            if (card && getNmIdFromUrl() === nmId) {
-                cachedForNmId = nmId;
-                cachedCardData = buildProductDataFromCardJson(card);
+        if (attemptedNmId !== nmId) {
+            if (!inFlightPromise) {
+                inFlightPromise = fetchCardJson(nmId).then((card) => {
+                    attemptedNmId = nmId;
+                    if (card && getNmIdFromUrl() === nmId) {
+                        cachedForNmId = nmId;
+                        cachedCardData = buildProductDataFromCardJson(card);
+                    }
+                    inFlightPromise = null;
+                });
             }
-            inFlightNmId = null;
+            await inFlightPromise;
         }
 
         return cachedCardData && cachedForNmId === nmId
