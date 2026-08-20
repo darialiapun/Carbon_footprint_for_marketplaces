@@ -121,13 +121,13 @@
      */
     const CATEGORY_RULES = [
         { re: /книг|канц|канцеляр|ежедневник|альбом\s*для/, kgPerKg: 1.5 },
-        { re: /продукты\s*питания|гастроном|супермаркет|кулинар|корм|консерв|колбас|сыр\b|хлеб|овощ|фрукт/, kgPerKg: 13 },
+        { re: /продукты\s*питания|гастроном|супермаркет|кулинар|корм|консерв|колбас|сыр(?![а-яё])|хлеб|овощ|фрукт/, kgPerKg: 13 },
         { re: /красот|космет|парф|уход|гигиен|шампунь|крем|маск|сыворотк|лицо|дезодорант/, kgPerKg: 5 },
         { re: /детск|игрушк|коляск|подгузник/, kgPerKg: 5 },
         { re: /бытовая\s*химия|стирк|чистящ|отбелив|моющ|освежитель/, kgPerKg: 3 },
-        { re: /автотовар|автомоб|шин(а|ы)\b|моторн(ое|ые)\s*масл/, kgPerKg: 10 },
+        { re: /автотовар|автомоб|шин(а|ы)(?![а-яё])|моторн(ое|ые)\s*масл/, kgPerKg: 10 },
         {
-            re: /бытовая\s*техника|встраиваемая|холодильник|стиральн|посудомоечн|духовк|фен|плита\b|пылесос|блендр|телевиз/,
+            re: /бытовая\s*техника|встраиваемая|холодильник|стиральн|посудомоечн|духовк|фен|плита(?![а-яё])|пылесос|блендр|телевиз/,
             kgPerKg: 20
         },
         {
@@ -136,8 +136,8 @@
         },
         { re: /спорт|туризм|тренаж|велосипед|палатк/, kgPerKg: 9 },
         { re: /обувь|кроссов|ботинк|туфл|сапог|босоножк|кеды|сланцы/, kgPerKg: 16 },
-        { re: /мебель|матрас|шкаф|диван|кресл|подушк|чемодан|стол\b|стул\b/, kgPerKg: 4 },
-        { re: /одежд|белье|трикотаж|куртк|плать|футбол|брюк|шорты|юбк|пальто|ремень|ремни|пояс\b|сумка|рюкзак|кошелек|аксессуар|бижутерия|зонт\b/, kgPerKg: 12 },
+        { re: /мебель|матрас|шкаф|диван|кресл|подушк|чемодан|стол(?![а-яё])|стул(?![а-яё])/, kgPerKg: 4 },
+        { re: /одежд|белье|трикотаж|куртк|плать|футбол|брюк|шорты|юбк|пальто|ремень|ремни|пояс(?![а-яё])|сумка|рюкзак|кошелек|аксессуар|бижутерия|зонт(?![а-яё])/, kgPerKg: 12 },
         { re: /корм|животн|наполнит|собак|кот/, kgPerKg: 8.6 }
     ];
 
@@ -182,7 +182,9 @@
     function parseWeightToKg(weightText) {
         if (!weightText) return null;
         // Берем только значения с единицами измерения, чтобы не ловить артикулы/ID.
-        const match = weightText.match(/(\d+(?:[.,]\d+)?)(?:\s*)(кг|г|kg|g|л|l|мл|ml)\b/i);
+        // \b не работает с кириллицей в JS (\w = только латиница) — используем
+        // негативный lookahead на соседнюю букву вместо границы слова.
+        const match = weightText.match(/(\d+(?:[.,]\d+)?)\s*(кг|г|kg|g|л|l|мл|ml)(?![а-яёa-z])/i);
         if (!match) return null;
         const value = parseNumber(match[1]);
         if (value === null) return null;
@@ -209,7 +211,7 @@
     function inferWeightFromTitle(productName) {
         if (!productName) return null;
         const t = productName.toLowerCase();
-        const m = t.match(/(\d+(?:[.,]\d+)?)\s*(кг|г|kg|g|л|l|мл|ml)\b/i);
+        const m = t.match(/(\d+(?:[.,]\d+)?)\s*(кг|г|kg|g|л|l|мл|ml)(?![а-яёa-z])/i);
         if (!m) return null;
         return parseWeightToKg(`${m[1]} ${m[2]}`);
     }
@@ -221,7 +223,7 @@
         if (/кроссов|кеды|сникерс/.test(hay)) return "shoes_sport";
         if (/обувь|туфл|лофер|мокасин|сланц|сандал|шлеп|балетк/.test(hay)) return "shoes_light";
         if (/белье|трус|носк|боксер|плавк/.test(hay)) return "underwear";
-        if (/футболк|поло\b|лонгслив|майка|топ\b/.test(hay)) return "tshirt";
+        if (/футболк|поло(?![а-яё])|лонгслив|майка|топ(?![а-яё])/.test(hay)) return "tshirt";
         if (/рубашк|блуз/.test(hay)) return "shirt";
         if (/юбк/.test(hay)) return "skirt";
         if (/шорт/.test(hay)) return "shorts";
@@ -314,9 +316,17 @@
         return null;
     }
 
+    /**
+     * Раньше тут были regex с \b вокруг кириллических слов ("\bвес\b" и т.п.) —
+     * это НИКОГДА не матчится в JS: \b — граница между \w (только латиница/цифры)
+     * и не-\w, а кириллица вся не-\w, так что оба края слова оказываются
+     * "не-словом" и границы просто нет. Функция была фактически мертва. Теперь
+     * используем hasWholeWord() — тот же корректный unicode-aware способ,
+     * которым уже пользуется matchMaterialCoefficient.
+     */
     function extractWeightFromPairs(pairs) {
         for (const [key, value] of Object.entries(pairs)) {
-            if (!/\bвес\b|\bмасса\b/i.test(key)) continue;
+            if (!hasWholeWord(key, "вес") && !hasWholeWord(key, "масса")) continue;
 
             // 1) Если единица есть в значении — парсим напрямую.
             const direct = parseWeightToKg(value);
@@ -326,19 +336,19 @@
             const numeric = parseNumber(value);
             if (numeric === null) continue;
 
-            if (/\bкг\b|kg/i.test(key)) {
+            if (hasWholeWord(key, "кг") || /kg/i.test(key)) {
                 const asKg = normalizeWeightKg(numeric);
                 if (asKg) return asKg;
             }
-            if (/\bг\b|грам/i.test(key)) {
+            if (hasWholeWord(key, "г") || hasWholeWord(key, "грам")) {
                 const asG = normalizeWeightKg(numeric / 1000);
                 if (asG) return asG;
             }
-            if (/\bмл\b|ml/i.test(key)) {
+            if (hasWholeWord(key, "мл") || /ml/i.test(key)) {
                 const asMl = normalizeWeightKg(numeric / 1000);
                 if (asMl) return asMl;
             }
-            if (/\bл\b|[^м]l\b/i.test(key)) {
+            if (hasWholeWord(key, "л") || (/l/i.test(key) && !/ml/i.test(key))) {
                 const asL = normalizeWeightKg(numeric);
                 if (asL) return asL;
             }

@@ -29,16 +29,18 @@
         const carrier = containers.find((el) => /вес\s*товара/i.test(el.textContent || ""));
         if (!carrier) return null;
         const carrierText = (carrier.textContent || "").toLowerCase();
+        // \b не работает с кириллицей в JS (\w = только латиница) — используем
+        // негативный lookahead/lookbehind на соседние буквы вместо границы слова.
         const carrierUnit =
-            /\bкг\b|kg/.test(carrierText) ? "kg" :
-            (/\bг\b/.test(carrierText) ? "g" : null);
+            /(?<![а-яё])кг(?![а-яё])|kg/i.test(carrierText) ? "kg" :
+            (/(?<![а-яё])г(?![а-яё])/i.test(carrierText) ? "g" : null);
 
         const options = Array.from(carrier.querySelectorAll("button, label, li, div[role='button'], a"));
         if (!options.length) return null;
 
         const readWeight = (text) => {
             if (!text) return null;
-            const m = text.match(/(\d+(?:[.,]\d+)?)\s*(кг|г|kg|g)\b/i);
+            const m = text.match(/(\d+(?:[.,]\d+)?)\s*(кг|г|kg|g)(?![а-яёa-z])/i);
             if (m) return EcoCore.parseWeightToKg(`${m[1]} ${m[2]}`);
 
             // На Ozon в кнопках часто только числа (например 400, 800, 1500),
@@ -279,13 +281,14 @@
 
         // Вес: пытаемся взять из pairs по любому ключу с "вес/масса",
         // иначе ищем в тексте страницы (разные формулировки).
+        // \b не работает с кириллицей в JS — используем lookaround вместо границы слова.
         const weightFromPairsText =
-            EcoCore.getPairValue(pairs, /\bвес\b|\bмасса\b/i) ||
+            EcoCore.getPairValue(pairs, /(?<![а-яё])(вес|масса)(?![а-яё])/i) ||
             fullText.match(/(?:Вес|Масса)(?:\s+товара)?(?:\s+в\s+упаковке)?[^\d]{0,30}(\d[\d\s.,]*\s*(?:кг|г|kg|g|мл|ml|л|l))/i)?.[1];
 
         // Размеры/габариты: аналогично, ищем по "размер/габарит".
         const dimensionsFromPairs =
-            EcoCore.getPairValue(pairs, /\bразмер|\bгабарит/i) ||
+            EcoCore.getPairValue(pairs, /размер|габарит/i) ||
             fullText.match(/(?:Размеры|Габариты)(?:\s+упаковки)?[^\d]{0,30}([^\n]{1,80})/i)?.[1];
 
         const weightFromVariants = extractWeightFromVariantButtons();
