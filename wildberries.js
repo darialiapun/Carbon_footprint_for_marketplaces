@@ -137,14 +137,38 @@
         return pairs;
     }
 
+    // Кнопка "Характеристики и описание" открывает НЕ инлайн-блок, а полноэкранное
+    // модальное окно. Кликаем по ней максимум один раз на товар (иначе при каждом
+    // повторном запуске пайплайна, пока вес ещё не найден, модалка выскакивала бы
+    // заново) и сразу планируем её закрытие — пользователю не нужно видеть, как
+    // расширение само открывает и держит открытым системное окно характеристик.
+    let revealAttemptedForNmId = null;
+
+    function closeCharacteristicsModal() {
+        document.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true })
+        );
+
+        const closeBtn = Array.from(
+            document.querySelectorAll('button[aria-label], [class*="closeBtn"], [class*="CloseButton"]')
+        ).find(
+            (el) => el.isConnected && el.offsetParent !== null && /закрыть/i.test(el.getAttribute("aria-label") || "")
+        );
+        if (closeBtn) closeBtn.click();
+    }
+
     function triggerCharacteristicsReveal() {
+        const nmId = getNmIdFromUrl();
+        if (!nmId || revealAttemptedForNmId === nmId) return false;
+
         const candidates = Array.from(document.querySelectorAll("button, div[role='button'], a"));
         const el = candidates.find((el) => /характеристики\s+и\s+описание/i.test((el.textContent || "").trim()));
-        if (el && el.isConnected) {
-            el.click();
-            return true;
-        }
-        return false;
+        if (!el || !el.isConnected) return false;
+
+        revealAttemptedForNmId = nmId;
+        el.click();
+        setTimeout(closeCharacteristicsModal, 600);
+        return true;
     }
 
     // === Источник 2 (подстраховка): card.json ===
