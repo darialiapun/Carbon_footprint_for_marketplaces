@@ -32,6 +32,22 @@
         title: "h1"
     };
 
+    /**
+     * На странице бывает несколько <h1> (например скрытый рейтинг вида "4,9" в
+     * блоке отзывов) — если querySelector('h1') случайно попадает на него,
+     * productName становится мусором вроде "4,9", а вслед за этим ломается и
+     * определение категории (оно строится из категории+названия). Поэтому берём
+     * первый h1, чей текст не похож на голое число/рейтинг.
+     */
+    function getProductTitle() {
+        const candidates = Array.from(document.querySelectorAll(SELECTORS.title));
+        const real = candidates.find((el) => {
+            const text = el.textContent?.trim();
+            return text && text.length > 3 && !/^\d+([.,]\d+)?$/.test(text);
+        });
+        return real?.textContent?.trim() || null;
+    }
+
     function normalizePairKey(label) {
         return label.trim().toLowerCase().replace(/\s+/g, " ");
     }
@@ -65,6 +81,14 @@
         for (const [key, value] of Object.entries(pairs)) {
             if (!/вес|масса/i.test(key)) continue;
             const parsed = EcoCore.parseWeightToKg(value) || EcoCore.parseWeightToKg(`${value} г`);
+            if (parsed) return parsed;
+        }
+        // У жидкостей/кремов (уход, бытовая химия) явного веса часто нет вообще —
+        // только "Объем товара: 2000 мл". Плотность близка к воде (1 мл ≈ 1 г),
+        // так что объём — разумная замена весу, а не просто fallback по категории.
+        for (const [key, value] of Object.entries(pairs)) {
+            if (!/объ[ёе]м/i.test(key)) continue;
+            const parsed = EcoCore.parseWeightToKg(value);
             if (parsed) return parsed;
         }
         return null;
@@ -269,9 +293,13 @@
 
     function extractProductData() {
         const nmId = getNmIdFromUrl();
-        const productName = document.querySelector(SELECTORS.title)?.textContent?.trim() || "Товар";
-
         const domPairs = collectPairsFromCharacteristicsTables();
+        // <h1> — основной источник названия, но если его не нашли (например скрипт
+        // сработал раньше отрисовки заголовка), подстраховываемся полем "Полное
+        // наименование товара" из самой таблицы характеристик — оно надёжнее, чем
+        // просто "Товар", и от него зависит определение категории.
+        const productName = getProductTitle() || domPairs["полное наименование товара"] || "Товар";
+
         if (Object.keys(domPairs).length > 0) {
             return assembleProductData(domPairs, productName, "", {
                 weightSourceLabel: "таблица характеристик (DOM)",
