@@ -144,7 +144,12 @@
     // расширение само открывает и держит открытым системное окно характеристик.
     let revealAttemptedForNmId = null;
 
-    function closeCharacteristicsModal() {
+    function closeCharacteristicsModal(nmId) {
+        // Если пользователь уже успел перейти на другой товар, пока ждали таймер —
+        // ничего не трогаем на уже новой странице (иначе можно случайно нажать
+        // что-то не то или свернуть чужой раскрытый блок).
+        if (getNmIdFromUrl() !== nmId) return;
+
         document.dispatchEvent(
             new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true })
         );
@@ -167,7 +172,7 @@
 
         revealAttemptedForNmId = nmId;
         el.click();
-        setTimeout(closeCharacteristicsModal, 600);
+        setTimeout(() => closeCharacteristicsModal(nmId), 600);
         return true;
     }
 

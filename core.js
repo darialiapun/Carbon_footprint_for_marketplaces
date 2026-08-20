@@ -719,6 +719,17 @@
         let currentHero = null;
         let observer = null;
         let isRendering = false;
+        /**
+         * Лучший (по полноте данных) результат, уже отрисованный для текущего товара.
+         * Сайты вроде WB продолжают шевелить DOM фоном (карусели, попапы, сворачивание
+         * ранее раскрытых блоков) уже ПОСЛЕ того как мы удачно нашли вес — конвейер на
+         * это перезапускается, и без этой проверки более слабый повторный прогон (вес
+         * не найден, пар меньше) тихо перезатирал бы уже правильно отрисованный виджет
+         * запасным расчётом по категории. Разные товары — разные bestResultKey, поэтому
+         * на новый товар это никак не влияет.
+         */
+        let bestResultKey = null;
+        let bestResultScore = -1;
 
         /**
          * Короткое ожидание: максимум ~0.6с.
@@ -773,6 +784,18 @@
                     "└─ откуда взяты размеры": data.dimensionsSource,
                     compositionTextSnippet: (data.compositionText || "").slice(0, 150) || "(пусто)"
                 });
+
+                const pageKey = location.pathname;
+                const dataScore = (data.weightKg ? 1000 : 0) + (data.pairsCount || 0);
+                if (pageKey === bestResultKey && dataScore < bestResultScore) {
+                    logStep(3, "Пропускаем перерисовку — повторный прогон нашёл данные хуже уже отрисованных", {
+                        dataScore,
+                        bestResultScore
+                    });
+                    return;
+                }
+                bestResultKey = pageKey;
+                bestResultScore = dataScore;
 
                 const result = computeComprehensiveEmission(data);
 
