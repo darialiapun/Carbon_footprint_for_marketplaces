@@ -43,9 +43,9 @@ $$\text{Total} = (\text{Weight} \times \text{Coefficient}) + \text{PackagingEmis
 ## Настройка и установка
 
 1.  Скачайте репозиторий:
-    ```bash
+   ```bash
    git clone https://github.com/darialiapun/Carbon_footprint_for_marketplaces.git
-    ```
+```
 2.  Откройте браузер Chrome и перейдите по адресу: `chrome://extensions/`
 3.  Включите **«Режим разработчика»** (Developer mode) в правом верхнем углу.
 4.  Нажмите кнопку **«Загрузить распакованное расширение»** (Load unpacked) и выберите папку с проектом.
